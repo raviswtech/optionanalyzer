@@ -21,7 +21,7 @@ DEFAULT_CSV_DATA = """CALLS,,PUTS
 
 HOW_TO_GET_DATA_NSE = """
 **Steps to get Option Chain data from NSE Website:**
-1.  **Visit NSE India Website:** Go to `www.nseindia.com`.
+1.  **Visit NSE India Website:** Go to `https://www.nseindia.com/option-chain`.
 2.  **Navigate to Option Chain:** Market Data -> Derivatives -> Option Chain (Equity/Index).
 3.  **Select Instrument & Expiry:** Choose Index/Stock and the correct Expiry Date.
 4.  **Export Data:** Look for a "Download CSV" button and download the file.
@@ -30,6 +30,12 @@ HOW_TO_GET_DATA_NSE = """
 7.  **Analyze:** Fill other inputs and click "🚀 Analyze...".
 **Notes:** Copy entire relevant data range including NSE headers. For "Upload CSV", use the direct NSE download.
 """
+
+# Session state initialization 
+if 'custom_lot_size_active' not in st.session_state:
+    st.session_state.custom_lot_size_active = False
+if 'custom_lot_size_value' not in st.session_state: # Initialize based on lot_size_input
+    st.session_state.custom_lot_size_value = st.session_state.get('lot_size_input', 75)
 
 # --- Helper Functions ---
 def clean_number(value_str):
@@ -365,7 +371,7 @@ if 'iv_strategy_df' not in st.session_state: st.session_state.iv_strategy_df = p
 if 'gamma_strategy_df' not in st.session_state: st.session_state.gamma_strategy_df = pd.DataFrame()
 
 
-LOT_SIZE_OPTIONS = [25, 40, 50, 75, 100]
+LOT_SIZE_OPTIONS = [25, 40, 50, 75, 500,1000]
 
 # Add the new tab name to st.tabs
 tab_names = [
@@ -386,19 +392,111 @@ analysis_prompt_tab = tabs[7]
 final_recommendations_tab = tabs[8]
 
 
+
 with input_tab:
     st.header("Provide Market and Option Data")
     st.markdown("##### **Step 1: Market & Contract Parameters**")
-    col_cmp, col_vix, col_lot = st.columns(3)
-    with col_cmp: nifty_cmp = st.number_input("NIFTY CMP:", min_value=1.0, value=st.session_state.cmp_for_analysis, step=0.05, format="%.2f", help="Current market price of NIFTY or underlying.")
-    with col_vix: india_vix_val = st.number_input("India VIX (%):", min_value=1.0, value=st.session_state.india_vix_input, step=0.01, format="%.2f", key="india_vix_widget", help="Current India VIX value.")
-    with col_lot: lot_size_val = st.selectbox("Contract Lot Size:", options=LOT_SIZE_OPTIONS, index=LOT_SIZE_OPTIONS.index(st.session_state.lot_size_input), key="lot_size_select", help="Select lot size.")
+    
+    col_cmp, col_vix, col_lot_container = st.columns(3) # Use a container for lot size group
+    with col_cmp: 
+        nifty_cmp = st.number_input(
+            "NIFTY CMP:", 
+            min_value=1.0, 
+            value=st.session_state.cmp_for_analysis, 
+            step=0.05, 
+            format="%.2f",
+            help="Enter the current market price of the underlying (e.g., NIFTY spot price)."
+        )
+    with col_vix: 
+        india_vix_val = st.number_input(
+            "India VIX (%):", 
+            min_value=1.0, 
+            value=st.session_state.india_vix_input, 
+            step=0.01, 
+            format="%.2f", 
+            key="india_vix_widget",
+            help="Enter the current India VIX value (e.g., 16.5 for 16.5%)."
+        )
+    with col_lot_container: # Container for lot size widgets
+        st.write("Contract Lot Size:") # Label for the group
+        LOT_SIZE_PRESETS = [25, 40, 50, 75, 100]
+        
+        lot_size_choice_type = st.radio(
+            "Lot Size Type:", # Shortened label for radio
+            options=["Preset", "Custom"],
+            horizontal=True,
+            index=1 if st.session_state.custom_lot_size_active else 0, # Set index based on active state
+            key="lot_size_type_radio",
+            label_visibility="collapsed" # Hide the "Lot Size Type:" label if st.write is used above
+        )
+
+        if lot_size_choice_type == "Preset":
+            st.session_state.custom_lot_size_active = False
+            # If switching back from custom, try to find current lot_size_input in presets, or default
+            current_preset_val = st.session_state.lot_size_input
+            if current_preset_val not in LOT_SIZE_PRESETS:
+                # If current lot_size_input (possibly from a previous custom entry) is not a preset,
+                # default to the first preset or a common one like 75.
+                current_preset_val = st.session_state.lot_size_input if st.session_state.lot_size_input in LOT_SIZE_PRESETS else 75
+            
+            try:
+                preset_index = LOT_SIZE_PRESETS.index(current_preset_val)
+            except ValueError:
+                preset_index = LOT_SIZE_PRESETS.index(75) # Default to 75 if not found
+
+            selected_preset_lot_size = st.selectbox(
+                "Select Preset:", # Shortened label
+                options=LOT_SIZE_PRESETS,
+                index=preset_index,
+                key="lot_size_preset_select",
+                help="Select a common lot size."
+            )
+            lot_size_val = selected_preset_lot_size
+            st.session_state.lot_size_input = lot_size_val 
+            st.session_state.custom_lot_size_value = lot_size_val # Sync custom value display
+
+        else: # Custom
+            st.session_state.custom_lot_size_active = True
+            custom_lot_size = st.number_input(
+                "Enter Custom Lot Size:",
+                min_value=1,
+                value=int(st.session_state.custom_lot_size_value), # Ensure it's int for number_input
+                step=1,
+                key="lot_size_custom_input",
+                help="Enter a specific lot size if not in presets."
+            )
+            lot_size_val = custom_lot_size
+            st.session_state.lot_size_input = lot_size_val 
+            st.session_state.custom_lot_size_value = lot_size_val
+
     col_exp, col_r, col_q = st.columns(3)
-    with col_exp: expiry_date = st.date_input("Option Expiry Date:", value=st.session_state.expiry_date_for_analysis, min_value=date.today() + timedelta(days=1), help="Expiry date of options.")
-    with col_r: interest_rate = st.number_input("Annual Interest Rate (%):", min_value=0.0, max_value=20.0, value=st.session_state.interest_rate_for_analysis, step=0.1, format="%.1f", help="Risk-free interest rate (e.g., 7 for 7%).")
-    with col_q: dividend_yield = st.number_input("Annual Dividend Yield (q, %):", min_value=0.0, max_value=10.0, value=st.session_state.dividend_yield_for_analysis, step=0.05, format="%.2f", help="Continuous annual dividend yield (e.g., 1.2 for 1.2%).")
+    with col_exp: 
+        expiry_date = st.date_input(
+            "Option Expiry Date:", 
+            value=st.session_state.expiry_date_for_analysis, 
+            min_value=date.today() + timedelta(days=1),
+            help="Select the expiry date of the options you are analyzing."
+        )
+    with col_r: 
+        interest_rate = st.number_input(
+            "Annual Interest Rate (%):", 
+            min_value=0.0, max_value=20.0, 
+            value=st.session_state.interest_rate_for_analysis, 
+            step=0.1, format="%.1f",
+            help="Risk-free interest rate (e.g., 7 for 7%). Used in Black-Scholes."
+        )
+    with col_q: 
+        dividend_yield = st.number_input(
+            "Annual Dividend Yield (q, %):", 
+            min_value=0.0, max_value=10.0, 
+            value=st.session_state.dividend_yield_for_analysis, 
+            step=0.05, format="%.2f",
+            help="Continuous annual dividend yield of the underlying (e.g., 1.2 for 1.2%). Use 0 if none."
+        )
+
     dte_val = (expiry_date - date.today()).days
     st.info(f"Days to Expiry (DTE): {dte_val} days (Time in years for BSM: {dte_val/365.25:.4f})")
+
     st.markdown("---"); st.markdown("##### **Step 2: Option Chain Data**")
     with st.expander("ℹ️ Click for instructions on getting Option Chain Data from NSE", expanded=False): st.markdown(HOW_TO_GET_DATA_NSE)
     data_source = st.radio("Choose data source:", ("Paste CSV", "Upload CSV"), horizontal=True, index=0, key="data_source_radio", help="Select data provision method.")
@@ -409,14 +507,20 @@ with input_tab:
         if uploaded_file: 
             try: csv_input_data = io.StringIO(uploaded_file.getvalue().decode("utf-8")).read(); st.success("File uploaded!")
             except Exception as e: st.error(f"Error reading file: {e}"); csv_input_data = ""
+    
     st.markdown("---"); st.markdown("##### **Step 3: Analyze**")
     if st.button("🚀 Analyze Option Chain, Calculate Greeks & Generate Insights", type="primary", use_container_width=True, key="analyze_button"):
         if not nifty_cmp or dte_val <= 0 or not csv_input_data.strip(): st.error("Valid CMP, DTE > 0, & Option Data required.")
         else:
+            # Ensure lot_size_val is correctly captured from the logic above before this button press
+            # The variable 'lot_size_val' should be correctly set by the radio/selectbox/number_input logic
             st.session_state.india_vix_input = india_vix_val 
             st.session_state.dividend_yield_for_analysis = dividend_yield
-            st.session_state.lot_size_input = lot_size_val
+            st.session_state.lot_size_input = lot_size_val # This line now correctly uses the resolved lot_size_val
+            
             with st.spinner("Processing... Please wait."):
+                # ... (rest of the button logic: parse_option_chain_csv, calculate_greeks, analyze_option_data_extended, etc.)
+                # Make sure to pass the final `lot_size_val` to `analyze_option_data_extended`
                 parsed_df = parse_option_chain_csv(csv_input_data)
                 if not parsed_df.empty:
                     time_to_expiry_years = dte_val / 365.25
@@ -424,7 +528,10 @@ with input_tab:
                     put_greeks = parsed_df.apply(lambda r: calculate_greeks(r, 'put', nifty_cmp, r['STRIKE'], time_to_expiry_years, interest_rate, dividend_yield, 'PUTS_IV'), axis=1).rename(columns=lambda c: f'PUTS_{c.capitalize()}')
                     df_with_greeks = pd.concat([parsed_df, call_greeks, put_greeks], axis=1)
                     st.session_state.parsed_df_with_greeks = df_with_greeks
+                    
+                    # Pass the final lot_size_val to the analysis function
                     analysis_results_dict, df_processed_for_analysis = analyze_option_data_extended(df_with_greeks, nifty_cmp, india_vix_val, lot_size_val, interest_rate, dividend_yield, dte_val) 
+                    
                     st.session_state.analysis_results = analysis_results_dict
                     st.session_state.df_with_all_calcs = df_processed_for_analysis
                     st.session_state.cmp_for_analysis = nifty_cmp
@@ -433,39 +540,35 @@ with input_tab:
                     
                     # Generate and store all suggestion tables after main analysis
                     res = st.session_state.analysis_results
-                    avg_atm_iv_for_strat = res.get('avg_atm_iv', st.session_state.india_vix_input) # Use VIX as fallback
+                    avg_atm_iv_for_strat = res.get('avg_atm_iv', st.session_state.india_vix_input) 
                     if pd.isna(avg_atm_iv_for_strat): avg_atm_iv_for_strat = st.session_state.india_vix_input
 
                     st.session_state.general_strategy_df = pd.DataFrame(get_strategy_suggestions(
                         res.get('market_view', 'Neutral'), res.get('volatility_outlook', 'Moderate'), 
-                        avg_atm_iv_for_strat, analysis_res=None # General suggestions
+                        avg_atm_iv_for_strat, analysis_res=None 
                     ))
-                    # IV Specific Suggestions
                     iv_suggestions_list_final = []
-                    # ... (logic from iv_analysis_tab to generate iv_suggestions_list_final) ...
-                    # Example simplified:
-                    vix_current = st.session_state.india_vix_input
-                    if not pd.isna(avg_atm_iv_for_strat):
-                        if avg_atm_iv_for_strat > 18 and avg_atm_iv_for_strat > vix_current: 
+                    vix_current_local = st.session_state.india_vix_input # Use the one from state
+                    if not pd.isna(avg_atm_iv_for_strat): # Use resolved avg_atm_iv_for_strat
+                        if avg_atm_iv_for_strat > 18 and avg_atm_iv_for_strat > vix_current_local: 
                             iv_suggestions_list_final.append({"Category": "IV Profile", "Strategy": "Consider Option Selling", "Condition": "High IV > VIX", "Rationale": "Premiums rich.", "Max Risk": "Varies", "Max Reward": "Limited"})
-                        elif avg_atm_iv_for_strat < 14 and avg_atm_iv_for_strat < vix_current:
+                        elif avg_atm_iv_for_strat < 14 and avg_atm_iv_for_strat < vix_current_local:
                             iv_suggestions_list_final.append({"Category": "IV Profile", "Strategy": "Consider Option Buying", "Condition": "Low IV < VIX", "Rationale": "Premiums cheap.", "Max Risk": "Premium", "Max Reward": "High"})
                     st.session_state.iv_strategy_df = pd.DataFrame(iv_suggestions_list_final)
 
-                    # Gamma Specific Suggestions
                     gamma_suggestions_list_final = []
-                    g_flip_val = res.get('gamma_flip_level',0)
-                    net_mkt_gexp_notional_val = res.get('net_market_gamma_exposure_notional',0)
-                    if g_flip_val != 0:
-                        if nifty_cmp < g_flip_val and net_mkt_gexp_notional_val < -100_000_000: 
-                             gamma_suggestions_list_final.append({"Category": "Gamma Env.", "Strategy Type": "Long Gamma", "Condition": f"CMP < G-Flip ({g_flip_val}), Sig. Neg. GExp", "Consider": "Straddle/Strangle, Directional Buys"})
-                        elif nifty_cmp > g_flip_val and net_mkt_gexp_notional_val > 100_000_000:
-                             gamma_suggestions_list_final.append({"Category": "Gamma Env.", "Strategy Type": "Short Gamma", "Condition": f"CMP > G-Flip ({g_flip_val}), Sig. Pos. GExp", "Consider": "Iron Condors, Spreads"})
+                    g_flip_val_local = res.get('gamma_flip_level',0)
+                    net_mkt_gexp_notional_val_local = res.get('net_market_gamma_exposure_notional',0)
+                    if g_flip_val_local != 0:
+                        if nifty_cmp < g_flip_val_local and net_mkt_gexp_notional_val_local < -100_000_000: 
+                             gamma_suggestions_list_final.append({"Category": "Gamma Env.", "Strategy Type": "Long Gamma", "Condition": f"CMP < G-Flip ({g_flip_val_local}), Sig. Neg. GExp", "Consider": "Straddle/Strangle, Directional Buys"})
+                        elif nifty_cmp > g_flip_val_local and net_mkt_gexp_notional_val_local > 100_000_000:
+                             gamma_suggestions_list_final.append({"Category": "Gamma Env.", "Strategy Type": "Short Gamma", "Condition": f"CMP > G-Flip ({g_flip_val_local}), Sig. Pos. GExp", "Consider": "Iron Condors, Spreads"})
                     st.session_state.gamma_strategy_df = pd.DataFrame(gamma_suggestions_list_final)
 
                     st.success("Analysis Complete! Check other tabs for details.")
                 else: st.error("Failed to parse option chain data.")
-
+                
 with option_chain_tab:
     st.header("Processed Option Chain with Greeks")
     if not st.session_state.parsed_df_with_greeks.empty:
