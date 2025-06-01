@@ -1,0 +1,10 @@
+streamlit
+pandas
+numpy
+py_vollib
+nsepython
+# matplotlib is usually a dependency of streamlit or other plotting libraries, 
+# but good to list if directly used or if a specific version is needed.
+# We primarily used st.bar_chart which handles its own backend.
+# If you were to use matplotlib directly (e.g., fig, ax = plt.subplots()), then uncomment:
+# matplotlib 
